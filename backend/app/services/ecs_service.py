@@ -76,15 +76,16 @@ class ECSService:
                 log_group_name
             )
 
-            # Create ECS service
+            # Register target group with ALB listener FIRST (before creating ECS service)
+            # This associates the target group with the load balancer
+            listener_rule_arn = self._add_listener_rule(preview_id, target_group_arn)
+
+            # Create ECS service (target group must be associated with ALB first)
             service_arn = self._create_ecs_service(
                 service_name,
                 task_definition_arn,
                 target_group_arn
             )
-
-            # Register target group with ALB listener
-            listener_rule_arn = self._add_listener_rule(preview_id, target_group_arn)
 
             logger.info(f"Created ECS service {service_name} for preview {preview_id}")
             return service_arn, target_group_arn, listener_rule_arn
@@ -107,8 +108,13 @@ class ECSService:
             alb_response = self.elbv2.describe_load_balancers(LoadBalancerArns=[self.alb_arn])
             vpc_id = alb_response["LoadBalancers"][0]["VpcId"]
             
+            # Create target group name: remove dashes from UUID and ensure it doesn't end with dash
+            # AWS target group names: max 32 chars, can't start/end with dash
+            clean_id = preview_id.replace("-", "")[:24]  # Remove dashes, take first 24 chars
+            tg_name = f"preview-{clean_id}"  # Total: 8 + 24 = 32 chars max
+            
             response = self.elbv2.create_target_group(
-                Name=f"preview-{preview_id[:24]}",  # Target group names have 32 char limit (8 char prefix + 24 chars)
+                Name=tg_name,
                 Protocol="HTTP",
                 Port=8000,
                 VpcId=vpc_id,
@@ -169,7 +175,7 @@ class ECSService:
                     }
                 ]
             )
-            return response["TaskDefinition"]["TaskDefinitionArn"]
+            return response["taskDefinition"]["taskDefinitionArn"]
         except ClientError as e:
             logger.error(f"Failed to create task definition: {e}")
             raise
@@ -204,7 +210,7 @@ class ECSService:
                 ],
                 healthCheckGracePeriodSeconds=60
             )
-            return response["Service"]["ServiceArn"]
+            return response["service"]["serviceArn"]
         except ClientError as e:
             logger.error(f"Failed to create ECS service: {e}")
             raise

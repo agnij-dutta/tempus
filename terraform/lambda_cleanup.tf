@@ -43,7 +43,6 @@ resource "aws_lambda_function" "cleanup" {
 
   environment {
     variables = {
-      AWS_REGION         = var.region
       DYNAMODB_TABLE_NAME = aws_dynamodb_table.previews.name
       ECS_CLUSTER_NAME   = aws_ecs_cluster.main.name
     }

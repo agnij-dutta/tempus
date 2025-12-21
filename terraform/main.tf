@@ -12,14 +12,14 @@ terraform {
     }
   }
 
-  # Backend configuration - uncomment and configure after initial setup
-  # backend "s3" {
-  #   bucket         = "tempus-terraform-state"
-  #   key            = "terraform.tfstate"
-  #   region         = "ap-south-1"
-  #   dynamodb_table = "tempus-terraform-locks"
-  #   encrypt        = true
-  # }
+# Backend configuration - uncomment and configure after initial setup
+backend "s3" {
+  bucket         = "tempus-terraform-state-us-east-1"
+  key            = "terraform.tfstate"
+  region         = "us-east-1"
+  dynamodb_table = "tempus-terraform-locks"
+  encrypt        = true
+  }
 }
 
 provider "aws" {

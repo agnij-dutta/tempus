@@ -45,6 +45,16 @@ FastAPI Backend
 
 ## Quick Start
 
+### Automated Deployment
+
+For a fully automated deployment:
+
+```bash
+bash scripts/quick_deploy.sh
+```
+
+### Manual Deployment
+
 1. **Initial Setup**
    ```bash
    make setup
@@ -61,12 +71,18 @@ FastAPI Backend
    make deploy
    ```
 
-4. **Create a Preview Environment**
+4. **Deploy Backend Service**
+   
+   See [docs/deployment.md](docs/deployment.md#step-11-deploy-backend-service) for details on running the backend service locally or deploying it.
+
+5. **Create a Preview Environment**
    ```bash
-   curl -X POST http://<ALB_URL>/preview/create \
+   curl -X POST http://localhost:8000/preview/create \
      -H "Content-Type: application/json" \
      -d '{"ttl_hours": 2}'
    ```
+
+For detailed deployment instructions, see [docs/deployment.md](docs/deployment.md).
 
 ## API Documentation
 
