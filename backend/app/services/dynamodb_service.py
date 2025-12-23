@@ -114,3 +114,35 @@ class DynamoDBService:
             if e.response["Error"]["Code"] != "ResourceNotFoundException":
                 raise
 
+    def list_previews(self) -> list[Dict[str, Any]]:
+        """List all preview metadata items."""
+        try:
+            response = self.dynamodb.scan(TableName=self.table_name)
+            items = []
+            for raw in response.get("Items", []):
+                item = {}
+                for key, value in raw.items():
+                    if "S" in value:
+                        item[key] = value["S"]
+                    elif "N" in value:
+                        item[key] = value["N"]
+                items.append(item)
+            return items
+        except ClientError as e:
+            logger.error(f"Failed to list previews: {e}")
+            raise
+
+    def update_expires_at(self, preview_id: str, expires_at: str) -> None:
+        """Update the expiration timestamp for a preview."""
+        try:
+            self.dynamodb.update_item(
+                TableName=self.table_name,
+                Key={"preview_id": {"S": preview_id}},
+                UpdateExpression="SET expires_at = :expires",
+                ExpressionAttributeValues={":expires": {"S": expires_at}}
+            )
+            logger.info(f"Updated expires_at for preview {preview_id} to {expires_at}")
+        except ClientError as e:
+            logger.error(f"Failed to update expires_at for preview {preview_id}: {e}")
+            raise
+

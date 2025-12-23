@@ -29,6 +29,11 @@ ENV/
 .coverage
 htmlcov/
 
+# Frontend
+frontend/node_modules/
+frontend/.next/
+
+
 # Terraform
 .terraform/
 *.tfstate

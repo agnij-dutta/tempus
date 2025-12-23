@@ -1,6 +1,8 @@
 import logging
 import os
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict, Any, List
+
+import requests
 
 import boto3
 from botocore.exceptions import ClientError
@@ -47,6 +49,7 @@ class ECSService:
         self.container_image = container_image
         self.ecs = boto3.client("ecs", region_name=region)
         self.elbv2 = boto3.client("elbv2", region_name=region)
+        self.region = region
 
     def create_preview_service(
         self,
@@ -314,4 +317,64 @@ class ECSService:
             Preview service URL
         """
         return f"http://{alb_dns_name}/preview-{preview_id}"
+
+    def get_service_status(self, preview_id: str) -> Dict[str, Any]:
+        """Get ECS service status and counts."""
+        service_name = f"preview-{preview_id}"
+        try:
+            response = self.ecs.describe_services(
+                cluster=self.cluster_name,
+                services=[service_name]
+            )
+            services = response.get("services", [])
+            if not services:
+                return {"status": "not_found"}
+            svc = services[0]
+            return {
+                "status": svc.get("status"),
+                "desiredCount": svc.get("desiredCount"),
+                "runningCount": svc.get("runningCount"),
+                "pendingCount": svc.get("pendingCount"),
+                "serviceArn": svc.get("serviceArn")
+            }
+        except ClientError as e:
+            logger.error(f"Failed to get service status for {preview_id}: {e}")
+            raise
+
+    def get_target_group_health(self, target_group_arn: str) -> Dict[str, Any]:
+        """Get target group health summary."""
+        try:
+            health = self.elbv2.describe_target_health(
+                TargetGroupArn=target_group_arn
+            )
+            descriptions = health.get("TargetHealthDescriptions", [])
+            states: List[str] = [d["TargetHealth"]["State"] for d in descriptions]
+            summary = "unknown"
+            if states:
+                if all(s == "healthy" for s in states):
+                    summary = "healthy"
+                elif any(s == "unhealthy" for s in states):
+                    summary = "unhealthy"
+                else:
+                    summary = ",".join(sorted(set(states)))
+            return {
+                "summary": summary,
+                "descriptions": descriptions
+            }
+        except ClientError as e:
+            logger.error(f"Failed to get target group health {target_group_arn}: {e}")
+            raise
+
+    def test_preview_url(self, preview_url: str, timeout: int = 10) -> Dict[str, Any]:
+        """Perform a simple GET to the preview URL."""
+        try:
+            resp = requests.get(preview_url, timeout=timeout)
+            return {
+                "status_code": resp.status_code,
+                "headers": dict(resp.headers),
+                "body_sample": resp.text[:500]
+            }
+        except requests.RequestException as e:
+            logger.error(f"Failed to test preview URL {preview_url}: {e}")
+            return {"error": str(e)}
 

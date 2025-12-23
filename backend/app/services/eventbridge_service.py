@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime
 from typing import Optional
@@ -122,4 +123,23 @@ class EventBridgeService:
             # Don't raise - idempotent operation
             if e.response["Error"]["Code"] not in ["ResourceNotFoundException", "ValidationException"]:
                 raise
+
+    def reschedule_cleanup(self, preview_id: str, expires_at: str, rule_name: str) -> str:
+        """Reschedule cleanup by reusing schedule_cleanup with the same rule."""
+        # Simply call schedule_cleanup with the provided rule name to overwrite schedule/targets.
+        return self.schedule_cleanup(preview_id=preview_id, expires_at=expires_at, rule_name=rule_name)
+
+    def invoke_cleanup(self, preview_id: str) -> None:
+        """Invoke the cleanup Lambda immediately."""
+        try:
+            payload = {"preview_id": preview_id}
+            self.lambda_client.invoke(
+                FunctionName=self.lambda_function_arn,
+                InvocationType="Event",
+                Payload=json.dumps(payload).encode("utf-8")
+            )
+            logger.info(f"Invoked cleanup Lambda for preview {preview_id}")
+        except ClientError as e:
+            logger.error(f"Failed to invoke cleanup Lambda for {preview_id}: {e}")
+            raise
 

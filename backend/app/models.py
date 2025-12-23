@@ -43,3 +43,45 @@ class PreviewMetadata(BaseModel):
     created_at: str
     eventbridge_rule_name: Optional[str] = None
 
+
+class PreviewStatus(BaseModel):
+    """Status summary for a preview environment."""
+    preview_id: str
+    status: str
+    preview_url: str
+    expires_at: str
+    created_at: str
+    service_status: Optional[str] = None
+    target_group_health: Optional[str] = None
+
+
+class PreviewStatusDetail(BaseModel):
+    """Detailed status with health information."""
+    preview_id: str
+    status: str
+    preview_url: str
+    expires_at: str
+    created_at: str
+    service_status: Optional[str] = None
+    desired_count: Optional[int] = None
+    running_count: Optional[int] = None
+    pending_count: Optional[int] = None
+    target_group_health: Optional[str] = None
+    target_health_descriptions: Optional[list] = None
+
+
+class PreviewListResponse(BaseModel):
+    """Paginated list of previews."""
+    items: list[PreviewStatus]
+    total: int
+
+
+class ExtendPreviewRequest(BaseModel):
+    """Request to extend preview TTL."""
+    additional_hours: int = Field(
+        default=1,
+        ge=1,
+        le=24,
+        description="Number of hours to extend the preview TTL (1-24)"
+    )
+

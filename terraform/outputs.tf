@@ -38,3 +38,13 @@ output "ecr_repository_url" {
   value       = aws_ecr_repository.main.repository_url
 }
 
+output "backend_service_name" {
+  description = "Name of the backend ECS service"
+  value       = aws_ecs_service.backend.name
+}
+
+output "backend_service_arn" {
+  description = "ARN of the backend ECS service"
+  value       = aws_ecs_service.backend.id
+}
+
