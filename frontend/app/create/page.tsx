@@ -29,10 +29,10 @@ export default function CreatePreviewPage() {
         />
         <button
           className="mt-4 w-full rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground shadow hover:opacity-90 disabled:opacity-50"
-          disabled={mutation.isLoading}
+          disabled={mutation.isPending}
           onClick={() => mutation.mutate(ttl)}
         >
-          {mutation.isLoading ? "Creating..." : "Create Preview"}
+          {mutation.isPending ? "Creating..." : "Create Preview"}
         </button>
 
         {mutation.data && (

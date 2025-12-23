@@ -50,9 +50,9 @@ export default function PreviewDetailsPage() {
           <button
             onClick={() => deleteMutation.mutate()}
             className="rounded-md border px-3 py-2 text-sm text-destructive hover:bg-muted"
-            disabled={deleteMutation.isLoading}
+            disabled={deleteMutation.isPending}
           >
-            {deleteMutation.isLoading ? "Deleting..." : "Delete"}
+            {deleteMutation.isPending ? "Deleting..." : "Delete"}
           </button>
         </div>
       </div>
@@ -98,16 +98,16 @@ export default function PreviewDetailsPage() {
               <button
                 onClick={() => extendMutation.mutate(1)}
                 className="rounded-md border px-3 py-2 text-sm hover:bg-muted"
-                disabled={extendMutation.isLoading}
+                disabled={extendMutation.isPending}
               >
-                {extendMutation.isLoading ? "Extending..." : "Extend +1h"}
+                {extendMutation.isPending ? "Extending..." : "Extend +1h"}
               </button>
               <button
                 onClick={() => testMutation.mutate()}
                 className="rounded-md border px-3 py-2 text-sm hover:bg-muted"
-                disabled={testMutation.isLoading}
+                disabled={testMutation.isPending}
               >
-                {testMutation.isLoading ? "Testing..." : "Test URL"}
+                {testMutation.isPending ? "Testing..." : "Test URL"}
               </button>
             </div>
 

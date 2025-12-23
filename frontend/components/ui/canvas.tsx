@@ -2,41 +2,41 @@ import React, { useEffect } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-function n(e) {
+function n(this: any, e: any) {
   this.init(e || {});
 }
 n.prototype = {
-  init: function (e) {
+  init: function (this: any, e: any) {
     this.phase = e.phase || 0;
     this.offset = e.offset || 0;
     this.frequency = e.frequency || 0.001;
     this.amplitude = e.amplitude || 1;
   },
-  update: function () {
+  update: function (this: any) {
     return (this.phase += this.frequency), (e = this.offset + Math.sin(this.phase) * this.amplitude);
   },
-  value: function () {
+  value: function (this: any) {
     return e;
   },
 };
 
-function Line(e) {
+function Line(this: any, e: any) {
   this.init(e || {});
 }
 
 Line.prototype = {
-  init: function (e) {
+  init: function (this: any, e: any) {
     this.spring = e.spring + 0.1 * Math.random() - 0.05;
     this.friction = E.friction + 0.01 * Math.random() - 0.005;
     this.nodes = [];
     for (let t, n = 0; n < E.size; n++) {
-      t = new Node();
+      t = new (Node as any)();
       t.x = pos.x;
       t.y = pos.y;
       this.nodes.push(t);
     }
   },
-  update: function () {
+  update: function (this: any) {
     let e = this.spring,
       t = this.nodes[0];
     t.vx += (pos.x - t.x) * e;
@@ -55,7 +55,7 @@ Line.prototype = {
         (t.y += t.vy),
         (e *= E.tension);
   },
-  draw: function () {
+  draw: function (this: any) {
     let e,
       t,
       n = this.nodes[0].x,
@@ -99,7 +99,7 @@ function resizeCanvas() {
   ctx.canvas.height = window.innerHeight;
 }
 
-let ctx: CanvasRenderingContext2D,
+let ctx: CanvasRenderingContext2D & { running: boolean; frame: number },
   f: any,
   e = 0,
   pos: { x: number; y: number },
@@ -112,7 +112,7 @@ let ctx: CanvasRenderingContext2D,
     dampening: 0.025,
     tension: 0.99,
   };
-function Node() {
+function Node(this: any) {
   this.x = 0;
   this.y = 0;
   this.vy = 0;
@@ -122,17 +122,17 @@ function Node() {
 const initLines = () => {
   lines = [];
   for (let i = 0; i < E.trails; i++) {
-    lines.push(new Line({ spring: 0.45 + (i / E.trails) * 0.025 }));
+    lines.push(new (Line as any)({ spring: 0.45 + (i / E.trails) * 0.025 }));
   }
 };
 
 export const renderCanvas = function () {
   const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;
   if (!canvas) return;
-  ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
+  ctx = canvas.getContext("2d") as CanvasRenderingContext2D & { running: boolean; frame: number };
   ctx.running = true;
   ctx.frame = 1;
-  f = new n({
+  f = new (n as any)({
     phase: Math.random() * 2 * Math.PI,
     amplitude: 85,
     frequency: 0.0015,
