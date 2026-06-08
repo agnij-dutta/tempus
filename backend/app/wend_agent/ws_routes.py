@@ -28,6 +28,7 @@ from .clerk_client import get_user_metadata, require_anthropic_key, require_gith
 from .concurrency import assert_within_cap
 from .config import WendAgentConfig
 from .provisioner import provision
+from .repo_resolver import resolve_repo
 from .auth import _fetch_jwks  # reuse JWKS cache
 
 # python-jose may not be importable in every environment; alias the
@@ -154,16 +155,47 @@ async def ws_dispatch(request: Request):
         raise HTTPException(401, "connection not authenticated")
 
     prompt = (payload.get("prompt") or "").strip()
-    repo = (payload.get("repo") or "").strip()
-    ref = (payload.get("ref") or "main").strip() or "main"
+    explicit_repo = (payload.get("repo") or "").strip()
+    explicit_ref = (payload.get("ref") or "").strip() or None
     note_id = payload.get("noteId") or payload.get("note_id")
-    if not prompt or not repo:
-        raise HTTPException(400, "prompt + repo required")
+    if not prompt:
+        raise HTTPException(400, "prompt required")
 
     assert_within_cap(cfg, user_id)
     meta = await get_user_metadata(cfg, user_id)
     require_anthropic_key(meta)
     require_github_install(meta)
+
+    if explicit_repo:
+        # Caller pinned a specific repo on this note (e.g. via long-press
+        # send). Honor it as-is.
+        repo = explicit_repo
+        ref = explicit_ref or "main"
+        route_source = "pinned"
+        route_conf = 1.0
+    else:
+        # Server-side resolution against the installation's visible repos.
+        resolved = await resolve_repo(cfg, meta.github_installation_id or 0, prompt)
+        if resolved is None:
+            raise HTTPException(409, "No repos accessible to the Wend Cloud install. Open Settings → Connect GitHub and grant access to at least one repo.")
+        repo = resolved.full_name
+        ref = explicit_ref or resolved.default_branch
+        route_source = resolved.source  # "auto" | "fallback"
+        route_conf = resolved.confidence
+
+    # Emit a route event over the WS so the phone can render its project
+    # chip before the container even starts. Mirrors the Mac daemon's
+    # SSE behaviour. Container will re-emit its own route event when it
+    # boots; the phone takes whichever lands first.
+    _post_to_connection(cfg, event, connection_id, {
+        "event": "route",
+        "data": json.dumps({
+            "name": repo.split("/")[-1],
+            "cwd": f"/workspace ({repo})",
+            "source": route_source,
+            "confidence": route_conf,
+        }),
+    })
 
     handle = await provision(
         cfg,
@@ -177,8 +209,6 @@ async def ws_dispatch(request: Request):
         prompt=prompt,
         session_id=payload.get("sessionId") or payload.get("session_id"),
     )
-    # Push initial ack so the phone knows the agent is up; the container
-    # itself will push subsequent SSE events.
     _post_to_connection(cfg, event, connection_id, _ack_frame(handle.agent_id, repo))
     return {"statusCode": 200, "body": ""}
 
