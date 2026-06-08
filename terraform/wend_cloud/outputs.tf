@@ -4,8 +4,13 @@ output "api_function_url" {
 }
 
 output "api_url" {
-  description = "Public API Gateway HTTP API URL — the canonical ingress for the mobile app"
+  description = "Public API Gateway HTTP API URL — fallback ingress (BUFFERED responses, no SSE streaming)"
   value       = aws_apigatewayv2_stage.default.invoke_url
+}
+
+output "api_cdn_url" {
+  description = "Public CloudFront URL — canonical ingress with SSE streaming"
+  value       = "https://${aws_cloudfront_distribution.wend_cloud_api.domain_name}"
 }
 
 output "api_ecr_repository_url" {

@@ -180,7 +180,7 @@ resource "aws_lambda_function" "wend_cloud_api" {
 
 resource "aws_lambda_function_url" "wend_cloud_api" {
   function_name      = aws_lambda_function.wend_cloud_api.function_name
-  authorization_type = "NONE"
+  authorization_type = "AWS_IAM"
   invoke_mode        = "RESPONSE_STREAM"
 
   cors {
@@ -190,17 +190,6 @@ resource "aws_lambda_function_url" "wend_cloud_api" {
     allow_headers     = ["authorization", "content-type"]
     max_age           = 600
   }
-}
-
-# Lambda Function URLs with authorization_type = "NONE" still require an
-# explicit resource-policy grant to the public principal before invokes
-# succeed; otherwise every request returns 403 Forbidden.
-resource "aws_lambda_permission" "wend_cloud_api_url_public" {
-  statement_id           = "AllowPublicFunctionUrlInvoke"
-  action                 = "lambda:InvokeFunctionUrl"
-  function_name          = aws_lambda_function.wend_cloud_api.function_name
-  principal              = "*"
-  function_url_auth_type = "NONE"
 }
 
 # ECS cluster the wend-agent tasks launch into. Cheaper than a Fargate
