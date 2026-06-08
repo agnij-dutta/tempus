@@ -13,6 +13,7 @@ from app.wend_agent import (
     router as wend_agent_router,
     connect_router as wend_connect_router,
     ws_router as wend_ws_router,
+    runs_router as wend_runs_router,
 )
 
 # Configure logging
@@ -135,6 +136,7 @@ app.include_router(preview.router)
 app.include_router(wend_agent_router)
 app.include_router(wend_connect_router)
 app.include_router(wend_ws_router)
+app.include_router(wend_runs_router)
 
 
 @app.get("/health", tags=["default"], summary="Root Health Check")

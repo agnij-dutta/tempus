@@ -109,6 +109,8 @@ resource "aws_iam_role_policy" "wend_cloud_api_inline" {
           "${aws_dynamodb_table.wend_agents.arn}/index/*",
           aws_dynamodb_table.wend_ws_connections.arn,
           "${aws_dynamodb_table.wend_ws_connections.arn}/index/*",
+          aws_dynamodb_table.wend_runs.arn,
+          "${aws_dynamodb_table.wend_runs.arn}/index/*",
         ]
       },
       {
@@ -159,6 +161,7 @@ resource "aws_lambda_function" "wend_cloud_api" {
       WEND_WS_API_ID                = aws_apigatewayv2_api.wend_cloud_ws.id
       WEND_WS_STAGE                 = aws_apigatewayv2_stage.wend_cloud_ws.name
       WEND_WS_CONNECTIONS_TABLE     = aws_dynamodb_table.wend_ws_connections.name
+      WEND_RUNS_TABLE               = aws_dynamodb_table.wend_runs.name
       AWS_LWA_READINESS_CHECK_PATH  = "/health"
       AWS_LWA_PORT                  = "8000"
       ECS_CLUSTER_NAME              = "default"

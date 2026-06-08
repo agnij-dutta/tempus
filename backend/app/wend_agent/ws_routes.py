@@ -24,7 +24,7 @@ from typing import Any
 import boto3
 from fastapi import APIRouter, HTTPException, Request
 
-from .clerk_client import get_user_metadata, require_anthropic_key, require_github_install
+from .clerk_client import get_user_metadata, require_billing_source, require_github_install
 from .concurrency import assert_within_cap
 from .config import WendAgentConfig
 from .provisioner import provision
@@ -184,7 +184,7 @@ async def _handle_ws_dispatch(event: dict):
     try:
         assert_within_cap(cfg, user_id)
         meta = await get_user_metadata(cfg, user_id)
-        require_anthropic_key(meta)
+        require_billing_source(meta)
         require_github_install(meta)
     except HTTPException as exc:
         _push_error(cfg, event, connection_id, str(exc.detail))

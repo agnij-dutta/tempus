@@ -165,8 +165,11 @@ resource "aws_iam_role_policy" "wend_agent_task" {
       },
       {
         Effect   = "Allow"
-        Action   = ["dynamodb:UpdateItem", "dynamodb:GetItem"]
-        Resource = aws_dynamodb_table.wend_agents.arn
+        Action   = ["dynamodb:UpdateItem", "dynamodb:GetItem", "dynamodb:PutItem"]
+        Resource = [
+          aws_dynamodb_table.wend_agents.arn,
+          aws_dynamodb_table.wend_runs.arn,
+        ]
       },
       {
         Effect   = "Allow"

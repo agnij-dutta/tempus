@@ -39,6 +39,7 @@ class UserMetadata:
     anthropic_api_key: str | None
     github_installation_id: int | None
     github_login: str | None
+    claude_credentials_json: str | None  # Claude Code OAuth creds, subscription-billed
 
 
 async def get_user_metadata(cfg: WendAgentConfig, user_id: str) -> UserMetadata:
@@ -55,6 +56,7 @@ async def get_user_metadata(cfg: WendAgentConfig, user_id: str) -> UserMetadata:
         anthropic_api_key=private.get("anthropic_api_key"),
         github_installation_id=private.get("github_installation_id"),
         github_login=private.get("github_login"),
+        claude_credentials_json=private.get("claude_credentials_json"),
     )
 
 
@@ -72,12 +74,30 @@ async def patch_user_metadata(cfg: WendAgentConfig, user_id: str, patch: dict[st
 
 
 def require_anthropic_key(meta: UserMetadata) -> str:
+    """Backwards-compat helper used when an API key is the only auth path.
+    The dispatch flow prefers Claude OAuth creds when present and only
+    falls back to API key when no creds are set."""
     if not meta.anthropic_api_key:
         raise HTTPException(
             status_code=402,
             detail="Anthropic API key not set. Open Settings → Connect Anthropic on your phone to paste your key.",
         )
     return meta.anthropic_api_key
+
+
+def require_billing_source(meta: UserMetadata) -> tuple[str, str | None, str | None]:
+    """Return (mode, claude_creds, api_key) for the upcoming dispatch.
+
+    Prefers Claude OAuth (subscription billing) when present; falls back
+    to API key. Raises 402 if neither is configured."""
+    if meta.claude_credentials_json:
+        return ("claude_oauth", meta.claude_credentials_json, None)
+    if meta.anthropic_api_key:
+        return ("api_key", None, meta.anthropic_api_key)
+    raise HTTPException(
+        status_code=402,
+        detail="No Anthropic billing source. Open Settings → Connect Anthropic (paste an API key) or Connect Claude (subscription via your Mac).",
+    )
 
 
 def require_github_install(meta: UserMetadata) -> int:

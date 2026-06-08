@@ -158,7 +158,23 @@ def stream_claude(prompt: str, sink: IO[bytes], session_id: str | None) -> None:
     if session_id:
         cmd.extend(["--resume", session_id])
     env = os.environ.copy()
-    if ANTHROPIC_API_KEY:
+    # Subscription-billed path: write Claude OAuth creds to the file
+    # Claude Code reads on boot. Drop any ANTHROPIC_API_KEY in env so
+    # Claude doesn't prefer the API-key path.
+    if CLAUDE_CREDS_JSON:
+        try:
+            home = os.path.expanduser("~")
+            claude_dir = os.path.join(home, ".claude")
+            os.makedirs(claude_dir, exist_ok=True)
+            creds_path = os.path.join(claude_dir, ".credentials.json")
+            with open(creds_path, "w", encoding="utf-8") as f:
+                f.write(CLAUDE_CREDS_JSON)
+            os.chmod(creds_path, 0o600)
+            log(f"wrote Claude OAuth creds to {creds_path}")
+            env.pop("ANTHROPIC_API_KEY", None)
+        except Exception as exc:
+            log(f"failed to write Claude creds: {exc}")
+    elif ANTHROPIC_API_KEY:
         env["ANTHROPIC_API_KEY"] = ANTHROPIC_API_KEY
 
     proc = subprocess.Popen(
@@ -266,6 +282,9 @@ WS_SESSION_ID = ENV.get("WEND_SESSION_ID", "")
 PUSH_TOKEN = ENV.get("WEND_PUSH_TOKEN", "")
 NOTE_TITLE = ENV.get("WEND_NOTE_TITLE", "")
 NOTE_ID = ENV.get("WEND_NOTE_ID", "")
+USER_ID = ENV.get("WEND_USER_ID", "")
+RUNS_TABLE = ENV.get("WEND_RUNS_TABLE", "")
+CLAUDE_CREDS_JSON = ENV.get("WEND_CLAUDE_CREDS_JSON", "")
 
 
 def fire_push(body: str, ok: bool) -> None:
@@ -356,18 +375,15 @@ def run_ws_mode() -> None:
         return
     clone_repo()
     sink = WSSink(WS_CALLBACK_URL, WS_CONNECTION_ID)
+    captured: dict = {"assistant": "", "tool_uses": [], "tool_calls": [], "result": None, "session_id": ""}
+    started_at = time.time()
     ok = True
-    last_text = ""
     try:
-        # Patch the sink's write to also accumulate any assistant text so we
-        # have something useful to put in the push body.
         original_write = sink.write
         def capture_and_write(data: bytes) -> None:
-            nonlocal last_text
             try:
                 text = data.decode("utf-8", "replace")
-                if '"type":"assistant"' in text:
-                    last_text = text
+                _capture_frame(text, captured)
             except Exception:
                 pass
             original_write(data)
@@ -378,27 +394,83 @@ def run_ws_mode() -> None:
         log(f"WS dispatch raised: {exc}")
     finally:
         sink._closed = True
-        body = _excerpt(last_text) or ("Reply ready" if ok else "Run errored")
+        ended_at = time.time()
+        persist_run(captured, started_at, ended_at, ok=ok)
+        body = (captured["assistant"][:120] if captured["assistant"]
+                else ("Reply ready" if ok else "Run errored"))
         fire_push(body, ok=ok)
         log("WS dispatch complete; exiting")
 
 
-def _excerpt(stream_json_text: str) -> str:
-    """Pull a short snippet of assistant text out of the captured
-    stream-json frames for the push notification body."""
-    if not stream_json_text:
-        return ""
+def _capture_frame(text: str, captured: dict) -> None:
+    """Pull useful pieces out of each SSE frame as it streams so we can
+    persist a complete record at the end."""
+    for chunk in text.split("\n\n"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        data_parts: list[str] = []
+        for line in chunk.splitlines():
+            if line.startswith("data: "):
+                data_parts.append(line[len("data: "):])
+            elif line.startswith("data:"):
+                data_parts.append(line[len("data:"):])
+        data = "\n".join(data_parts).strip()
+        if not data:
+            continue
+        try:
+            frame = json.loads(data)
+        except Exception:
+            continue
+        ftype = frame.get("type")
+        if ftype == "assistant" and isinstance(frame.get("message"), dict):
+            for block in frame["message"].get("content", []) or []:
+                if isinstance(block, dict):
+                    if block.get("type") == "text" and isinstance(block.get("text"), str):
+                        captured["assistant"] += block["text"]
+                    elif block.get("type") == "tool_use" and isinstance(block.get("name"), str):
+                        captured["tool_uses"].append(block["name"])
+                        captured["tool_calls"].append({
+                            "name": block["name"],
+                            "input": block.get("input"),
+                        })
+        elif ftype == "result":
+            captured["result"] = frame
+            sid = frame.get("session_id")
+            if isinstance(sid, str):
+                captured["session_id"] = sid
+
+
+def persist_run(captured: dict, started_at: float, ended_at: float, ok: bool) -> None:
+    """Write a one-shot wend-runs row so the phone can catch up to a
+    run that finished while it was offline."""
+    if not RUNS_TABLE or not NOTE_ID:
+        return
     try:
-        frame = json.loads(stream_json_text)
-        content = (frame.get("message") or {}).get("content") or []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                t = (block.get("text") or "").strip()
-                if t:
-                    return t.split("\n")[0][:120]
-    except Exception:
-        pass
-    return ""
+        import boto3, uuid
+        ddb = boto3.client("dynamodb")
+        result = captured.get("result") or {}
+        item = {
+            "noteId": {"S": NOTE_ID},
+            "createdAt": {"N": str(int(started_at * 1000))},
+            "runId": {"S": str(uuid.uuid4())},
+            "userId": {"S": USER_ID or "unknown"},
+            "agentId": {"S": AGENT_ID or "unknown"},
+            "repo": {"S": REPO or ""},
+            "response": {"S": captured.get("assistant") or ""},
+            "sessionId": {"S": captured.get("session_id") or ""},
+            "status": {"S": "done" if ok else "error"},
+            "durationMs": {"N": str(int((ended_at - started_at) * 1000))},
+            "costUsd": {"N": str(float(result.get("total_cost_usd") or 0.0))},
+            "toolUses": {"SS": list(set(captured["tool_uses"])) if captured["tool_uses"] else ["__none__"]},
+            "expiresAt": {"N": str(int(ended_at) + 86400 * 30)},  # 30-day retention
+        }
+        ddb.put_item(TableName=RUNS_TABLE, Item=item)
+        log(f"wend-runs persisted noteId={NOTE_ID}")
+    except Exception as exc:
+        log(f"persist_run failed: {exc}")
+
+
 
 
 def main() -> None:

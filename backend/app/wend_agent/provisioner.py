@@ -67,7 +67,7 @@ async def provision(
     )
 
     assert user_meta.github_installation_id is not None, "github install required pre-provision"
-    assert user_meta.anthropic_api_key, "anthropic api key required pre-provision"
+    assert user_meta.anthropic_api_key or user_meta.claude_credentials_json, "billing source required pre-provision"
     install = await mint_installation_token_for_install(
         cfg, user_meta.github_installation_id, repo,
     )
@@ -77,8 +77,12 @@ async def provision(
         {"name": "WEND_REPO", "value": repo},
         {"name": "WEND_REPO_REF", "value": ref},
         {"name": "WEND_GITHUB_INSTALL_TOKEN", "value": install.token},
-        {"name": "WEND_ANTHROPIC_API_KEY", "value": user_meta.anthropic_api_key},
     ]
+    # Prefer Claude OAuth (subscription) over API key (pay-per-token).
+    if user_meta.claude_credentials_json:
+        env_overrides.append({"name": "WEND_CLAUDE_CREDS_JSON", "value": user_meta.claude_credentials_json})
+    elif user_meta.anthropic_api_key:
+        env_overrides.append({"name": "WEND_ANTHROPIC_API_KEY", "value": user_meta.anthropic_api_key})
     if session_id:
         env_overrides.append({"name": "WEND_SESSION_ID", "value": session_id})
     if push_token:
@@ -87,6 +91,10 @@ async def provision(
         env_overrides.append({"name": "WEND_NOTE_TITLE", "value": note_title[:60]})
     if note_id:
         env_overrides.append({"name": "WEND_NOTE_ID", "value": note_id})
+    env_overrides.append({"name": "WEND_USER_ID", "value": user_id})
+    import os as _os
+    runs_table = _os.getenv("WEND_RUNS_TABLE", "wend-runs")
+    env_overrides.append({"name": "WEND_RUNS_TABLE", "value": runs_table})
     if ws_connection_id and ws_callback_url and prompt:
         # WS mode: container runs the prompt immediately and pushes events
         # via ApiGatewayManagementApi.PostToConnection to this connection.
