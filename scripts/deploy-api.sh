@@ -25,7 +25,7 @@ aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
 
 echo "→ building image"
-docker build --platform linux/amd64 -t "wend-cloud-api:$TAG" -f backend/Dockerfile.lambda backend/
+docker build --provenance=false --platform linux/amd64 -t "wend-cloud-api:$TAG" -f backend/Dockerfile.lambda backend/
 
 echo "→ tagging and pushing"
 docker tag "wend-cloud-api:$TAG" "$ECR_URL:$TAG"

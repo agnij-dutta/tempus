@@ -148,22 +148,22 @@ resource "aws_lambda_function" "wend_cloud_api" {
 
   environment {
     variables = {
-      AWS_LWA_INVOKE_MODE             = "RESPONSE_STREAM"
-      AWS_LWA_READINESS_CHECK_PATH    = "/health"
-      AWS_LWA_PORT                    = "8000"
-      ECS_CLUSTER_NAME                = "default"
-      WEND_AGENT_TASK_DEF             = aws_ecs_task_definition.wend_agent.arn
-      WEND_AGENT_TABLE                = aws_dynamodb_table.wend_agents.name
-      WEND_AGENT_SG                   = aws_security_group.wend_agent.id
-      SUBNET_IDS                      = join(",", local.effective_subnet_ids)
-      WEND_AGENT_MAX_CONCURRENT       = tostring(var.wend_agent_max_concurrent_per_user)
-      WEND_AGENT_IDLE_TIMEOUT_SEC     = tostring(var.wend_agent_idle_timeout_sec)
-      GITHUB_APP_ID                   = var.github_app_id
-      GITHUB_APP_PRIVATE_KEY_SECRET   = var.github_app_private_key_secret
-      CLERK_JWKS_URL                  = var.clerk_jwks_url
-      CLERK_ISSUER                    = var.clerk_issuer
-      CLERK_SECRET_KEY_SECRET         = aws_secretsmanager_secret.clerk_secret_key.name
-      AWS_REGION_OVERRIDE             = var.region
+      AWS_LWA_INVOKE_MODE           = "RESPONSE_STREAM"
+      AWS_LWA_READINESS_CHECK_PATH  = "/health"
+      AWS_LWA_PORT                  = "8000"
+      ECS_CLUSTER_NAME              = "default"
+      WEND_AGENT_TASK_DEF           = aws_ecs_task_definition.wend_agent.arn
+      WEND_AGENT_TABLE              = aws_dynamodb_table.wend_agents.name
+      WEND_AGENT_SG                 = aws_security_group.wend_agent.id
+      SUBNET_IDS                    = join(",", local.effective_subnet_ids)
+      WEND_AGENT_MAX_CONCURRENT     = tostring(var.wend_agent_max_concurrent_per_user)
+      WEND_AGENT_IDLE_TIMEOUT_SEC   = tostring(var.wend_agent_idle_timeout_sec)
+      GITHUB_APP_ID                 = var.github_app_id
+      GITHUB_APP_PRIVATE_KEY_SECRET = var.github_app_private_key_secret
+      CLERK_JWKS_URL                = var.clerk_jwks_url
+      CLERK_ISSUER                  = var.clerk_issuer
+      CLERK_SECRET_KEY_SECRET       = aws_secretsmanager_secret.clerk_secret_key.name
+      AWS_REGION_OVERRIDE           = var.region
     }
   }
 
@@ -186,10 +186,21 @@ resource "aws_lambda_function_url" "wend_cloud_api" {
   cors {
     allow_credentials = false
     allow_origins     = ["*"]
-    allow_methods     = ["GET", "POST", "OPTIONS"]
+    allow_methods     = ["*"]
     allow_headers     = ["authorization", "content-type"]
     max_age           = 600
   }
+}
+
+# Lambda Function URLs with authorization_type = "NONE" still require an
+# explicit resource-policy grant to the public principal before invokes
+# succeed; otherwise every request returns 403 Forbidden.
+resource "aws_lambda_permission" "wend_cloud_api_url_public" {
+  statement_id           = "AllowPublicFunctionUrlInvoke"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.wend_cloud_api.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
 }
 
 # ECS cluster the wend-agent tasks launch into. Cheaper than a Fargate

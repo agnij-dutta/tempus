@@ -11,11 +11,17 @@ ARG CLOUDFLARED_VERSION=2026.5.2
 
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
-RUN curl -fsSL -o /usr/local/bin/cloudflared \
-      "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" \
-    && chmod +x /usr/local/bin/cloudflared
+RUN set -eux; \
+    mkdir -p --mode=0755 /usr/share/keyrings; \
+    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+      | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null; \
+    echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" \
+      > /etc/apt/sources.list.d/cloudflared.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends cloudflared; \
+    rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -u 1000 wend && mkdir -p /workspace /app && chown -R wend:wend /workspace /app
+RUN useradd -m -u 1001 wend && mkdir -p /workspace /app && chown -R wend:wend /workspace /app
 
 COPY --chown=wend:wend entrypoint.py /app/entrypoint.py
 COPY --chown=wend:wend requirements.txt /app/requirements.txt
