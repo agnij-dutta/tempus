@@ -37,7 +37,7 @@ from jose import jwt as _jwt
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/ws", tags=["wend-agent-ws"])
+router = APIRouter(tags=["wend-agent-ws"])
 
 
 def _cfg() -> WendAgentConfig:
@@ -77,45 +77,58 @@ async def _validate_token(token: str, cfg: WendAgentConfig) -> str:
     return user_id
 
 
-@router.post("/connect")
-async def ws_connect(request: Request):
-    """$connect handler. The Lambda receives the API Gateway event with the
-    Clerk token in the query string. We register connectionId → userId."""
-    cfg = _cfg()
+@router.post("/events")
+async def ws_events_entry(request: Request):
+    """AWS Lambda Web Adapter forwards every API Gateway WebSocket
+    invocation here. The route key is in the body's requestContext.
+    We dispatch to the per-route handlers below."""
     body = await request.body()
     event = _ws_event(body)
+    route_key = (event.get("requestContext") or {}).get("routeKey", "")
+    if route_key == "$connect":
+        return await _handle_ws_connect(event)
+    if route_key == "$disconnect":
+        return await _handle_ws_disconnect(event)
+    if route_key == "dispatch":
+        return await _handle_ws_dispatch(event)
+    if route_key == "abort":
+        return await _handle_ws_abort(event)
+    # $default catch-all
+    return {"statusCode": 400, "body": json.dumps({"error": "unknown route", "routeKey": route_key})}
+
+
+async def _handle_ws_connect(event: dict):
+    cfg = _cfg()
     rc = event.get("requestContext", {})
-    connection_id = rc.get("connectionId")
-    if not connection_id:
-        connection_id = request.headers.get("x-apigw-connection-id")
+    connection_id = rc.get("connectionId") or "unknown"
 
     query = event.get("queryStringParameters") or {}
     token = query.get("token") or query.get("authorization")
     if not token:
-        raise HTTPException(401, "missing token query parameter")
+        return {"statusCode": 401, "body": "missing token query parameter"}
     if token.lower().startswith("bearer "):
         token = token[len("Bearer "):]
-    user_id = await _validate_token(token, cfg)
+    try:
+        user_id = await _validate_token(token, cfg)
+    except HTTPException as exc:
+        return {"statusCode": exc.status_code, "body": str(exc.detail)}
 
-    table = _cfg_table_name()
     ddb = boto3.client("dynamodb", region_name=cfg.aws_region)
     ddb.put_item(
-        TableName=table,
+        TableName=_cfg_table_name(),
         Item={
-            "connectionId": {"S": connection_id or "unknown"},
+            "connectionId": {"S": connection_id},
             "userId": {"S": user_id},
             "connectedAt": {"S": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
             "expiresAt": {"N": str(int(time.time()) + 7200)},
         },
     )
+    logger.info("ws $connect ok connection=%s user=%s", connection_id, user_id)
     return {"statusCode": 200, "body": ""}
 
 
-@router.post("/disconnect")
-async def ws_disconnect(request: Request):
+async def _handle_ws_disconnect(event: dict):
     cfg = _cfg()
-    body = await request.body()
-    event = _ws_event(body)
     rc = event.get("requestContext", {})
     connection_id = rc.get("connectionId")
     if not connection_id:
@@ -131,40 +144,51 @@ async def ws_disconnect(request: Request):
     return {"statusCode": 200, "body": ""}
 
 
-@router.post("/dispatch")
-async def ws_dispatch(request: Request):
-    """Dispatch route: spawn a wend-agent and let the container stream
-    events back to the connection."""
+async def _handle_ws_abort(event: dict):
+    rc = event.get("requestContext", {})
+    connection_id = rc.get("connectionId")
+    logger.info("ws abort received from %s", connection_id)
+    return {"statusCode": 200, "body": ""}
+
+
+async def _handle_ws_dispatch(event: dict):
     cfg = _cfg()
-    body = await request.body()
-    event = _ws_event(body)
     rc = event.get("requestContext", {})
     connection_id = rc.get("connectionId")
     if not connection_id:
-        raise HTTPException(400, "no connectionId in request context")
+        return {"statusCode": 400, "body": "no connectionId in request context"}
 
-    # The user payload is in event['body'] for WS routes (string, JSON-encoded).
     payload_raw = event.get("body") or "{}"
     try:
         payload = json.loads(payload_raw)
     except Exception:
-        raise HTTPException(400, "invalid payload JSON")
+        return {"statusCode": 400, "body": "invalid payload JSON"}
 
     user_id = _user_id_for_connection(cfg, connection_id)
     if not user_id:
-        raise HTTPException(401, "connection not authenticated")
+        _post_to_connection(cfg, event, connection_id, {
+            "event": "stderr",
+            "data": json.dumps("connection not authenticated"),
+        })
+        _post_to_connection(cfg, event, connection_id, {"event": "done", "data": "{\"code\":-1}"})
+        return {"statusCode": 401, "body": "connection not authenticated"}
 
     prompt = (payload.get("prompt") or "").strip()
     explicit_repo = (payload.get("repo") or "").strip()
     explicit_ref = (payload.get("ref") or "").strip() or None
     note_id = payload.get("noteId") or payload.get("note_id")
     if not prompt:
-        raise HTTPException(400, "prompt required")
+        _push_error(cfg, event, connection_id, "prompt required")
+        return {"statusCode": 400, "body": "prompt required"}
 
-    assert_within_cap(cfg, user_id)
-    meta = await get_user_metadata(cfg, user_id)
-    require_anthropic_key(meta)
-    require_github_install(meta)
+    try:
+        assert_within_cap(cfg, user_id)
+        meta = await get_user_metadata(cfg, user_id)
+        require_anthropic_key(meta)
+        require_github_install(meta)
+    except HTTPException as exc:
+        _push_error(cfg, event, connection_id, str(exc.detail))
+        return {"statusCode": exc.status_code, "body": str(exc.detail)}
 
     if explicit_repo:
         # Caller pinned a specific repo on this note (e.g. via long-press
@@ -177,7 +201,9 @@ async def ws_dispatch(request: Request):
         # Server-side resolution against the installation's visible repos.
         resolved = await resolve_repo(cfg, meta.github_installation_id or 0, prompt)
         if resolved is None:
-            raise HTTPException(409, "No repos accessible to the Wend Cloud install. Open Settings → Connect GitHub and grant access to at least one repo.")
+            msg = "No repos accessible to the Wend Cloud install. Open Settings → Connect GitHub and grant access to at least one repo."
+            _push_error(cfg, event, connection_id, msg)
+            return {"statusCode": 409, "body": msg}
         repo = resolved.full_name
         ref = explicit_ref or resolved.default_branch
         route_source = resolved.source  # "auto" | "fallback"
@@ -213,13 +239,18 @@ async def ws_dispatch(request: Request):
     return {"statusCode": 200, "body": ""}
 
 
-@router.post("/default")
-async def ws_default(request: Request):
-    """Catch-all for unhandled action values."""
-    return {"statusCode": 400, "body": "unknown action"}
-
-
 # ---- helpers ----
+
+
+def _push_error(cfg: WendAgentConfig, event: dict, connection_id: str, message: str) -> None:
+    """Push a stderr+done frame pair to the connection so the phone's
+    cloudDispatch consumer surfaces the error and closes the WS cleanly."""
+    _post_to_connection(cfg, event, connection_id, {
+        "event": "stderr", "data": json.dumps(message),
+    })
+    _post_to_connection(cfg, event, connection_id, {
+        "event": "done", "data": "{\"code\":-1}",
+    })
 
 def _cfg_table_name() -> str:
     import os
