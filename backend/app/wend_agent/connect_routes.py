@@ -91,6 +91,34 @@ async def github_status(
     }
 
 
+@router.get("/github/repos")
+async def github_repos(
+    user: ClerkUser = Depends(get_current_user),
+    cfg: WendAgentConfig = Depends(_cfg),
+):
+    """List the repos the user's Wend Cloud installation has access to.
+    Used by the phone's per-note repo picker."""
+    from .repo_resolver import _list_installation_repos  # local import
+
+    meta = await get_user_metadata(cfg, user.user_id)
+    if not meta.github_installation_id:
+        raise HTTPException(409, "GitHub App not installed")
+    repos = await _list_installation_repos(cfg, meta.github_installation_id)
+    return {
+        "repos": [
+            {
+                "full_name": r["full_name"],
+                "name": r["name"],
+                "private": r.get("private", False),
+                "default_branch": r.get("default_branch", "main"),
+                "pushed_at": r.get("pushed_at"),
+                "description": r.get("description"),
+            }
+            for r in repos
+        ],
+    }
+
+
 @router.get("/github/install-url")
 async def github_install_url(
     user: ClerkUser = Depends(get_current_user),
