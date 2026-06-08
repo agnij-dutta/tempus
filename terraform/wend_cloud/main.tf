@@ -42,7 +42,7 @@ data "aws_subnets" "default" {
 }
 
 locals {
-  aws_account_id   = data.aws_caller_identity.current.account_id
-  effective_vpc_id = var.vpc_id != "" ? var.vpc_id : data.aws_vpc.default.id
+  aws_account_id       = data.aws_caller_identity.current.account_id
+  effective_vpc_id     = var.vpc_id != "" ? var.vpc_id : data.aws_vpc.default.id
   effective_subnet_ids = length(var.subnet_ids) > 0 ? var.subnet_ids : data.aws_subnets.default.ids
 }

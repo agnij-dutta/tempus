@@ -13,6 +13,11 @@ output "api_cdn_url" {
   value       = "https://${aws_cloudfront_distribution.wend_cloud_api.domain_name}"
 }
 
+output "ws_url" {
+  description = "WebSocket URL for real-time cloud-dispatch streaming"
+  value       = "wss://${aws_apigatewayv2_api.wend_cloud_ws.id}.execute-api.${var.region}.amazonaws.com/${aws_apigatewayv2_stage.wend_cloud_ws.name}"
+}
+
 output "api_ecr_repository_url" {
   description = "ECR repo for the wend-cloud-api Lambda container image"
   value       = aws_ecr_repository.wend_cloud_api.repository_url

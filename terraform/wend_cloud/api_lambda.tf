@@ -107,7 +107,14 @@ resource "aws_iam_role_policy" "wend_cloud_api_inline" {
         Resource = [
           aws_dynamodb_table.wend_agents.arn,
           "${aws_dynamodb_table.wend_agents.arn}/index/*",
+          aws_dynamodb_table.wend_ws_connections.arn,
+          "${aws_dynamodb_table.wend_ws_connections.arn}/index/*",
         ]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["execute-api:ManageConnections"]
+        Resource = "arn:aws:execute-api:${var.region}:${local.aws_account_id}:${aws_apigatewayv2_api.wend_cloud_ws.id}/*/*"
       },
       {
         Effect = "Allow"
@@ -149,6 +156,9 @@ resource "aws_lambda_function" "wend_cloud_api" {
   environment {
     variables = {
       AWS_LWA_INVOKE_MODE           = "BUFFERED"
+      WEND_WS_API_ID                = aws_apigatewayv2_api.wend_cloud_ws.id
+      WEND_WS_STAGE                 = aws_apigatewayv2_stage.wend_cloud_ws.name
+      WEND_WS_CONNECTIONS_TABLE     = aws_dynamodb_table.wend_ws_connections.name
       AWS_LWA_READINESS_CHECK_PATH  = "/health"
       AWS_LWA_PORT                  = "8000"
       ECS_CLUSTER_NAME              = "default"

@@ -26,10 +26,10 @@ resource "aws_ecr_lifecycle_policy" "wend_agent" {
         rulePriority = 1
         description  = "Keep last 10 tagged images"
         selection = {
-          tagStatus     = "tagged"
+          tagStatus      = "tagged"
           tagPatternList = ["*"]
-          countType     = "imageCountMoreThan"
-          countNumber   = 10
+          countType      = "imageCountMoreThan"
+          countNumber    = 10
         }
         action = { type = "expire" }
       },
@@ -139,9 +139,9 @@ resource "aws_iam_role" "wend_agent_task" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect = "Allow"
+      Effect    = "Allow"
       Principal = { Service = "ecs-tasks.amazonaws.com" }
-      Action = "sts:AssumeRole"
+      Action    = "sts:AssumeRole"
     }]
   })
 }
@@ -154,23 +154,28 @@ resource "aws_iam_role_policy" "wend_agent_task" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = ["ssm:GetParameter", "ssm:GetParameters"]
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
         Resource = "arn:aws:ssm:${var.region}:${local.aws_account_id}:parameter/wend/agents/*"
       },
       {
-        Effect = "Allow"
-        Action = ["secretsmanager:GetSecretValue"]
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
         Resource = "arn:aws:secretsmanager:${var.region}:${local.aws_account_id}:secret:/wend/github-app/*"
       },
       {
-        Effect = "Allow"
-        Action = ["dynamodb:UpdateItem", "dynamodb:GetItem"]
+        Effect   = "Allow"
+        Action   = ["dynamodb:UpdateItem", "dynamodb:GetItem"]
         Resource = aws_dynamodb_table.wend_agents.arn
       },
       {
-        Effect = "Allow"
-        Action = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Effect   = "Allow"
+        Action   = ["execute-api:ManageConnections"]
+        Resource = "arn:aws:execute-api:${var.region}:${local.aws_account_id}:${aws_apigatewayv2_api.wend_cloud_ws.id}/*/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "${aws_cloudwatch_log_group.wend_agent.arn}:*"
       }
     ]

@@ -258,7 +258,83 @@ def watchdog() -> None:
             os._exit(0)
 
 
+MODE = ENV.get("WEND_MODE", "http")
+WS_CONNECTION_ID = ENV.get("WEND_WS_CONNECTION_ID", "")
+WS_CALLBACK_URL = ENV.get("WEND_WS_CALLBACK_URL", "")
+WS_PROMPT = ENV.get("WEND_PROMPT", "")
+WS_SESSION_ID = ENV.get("WEND_SESSION_ID", "")
+
+
+class WSSink:
+    """SSE sink that posts each frame to an API Gateway WebSocket connection
+    via ApiGatewayManagementApi.PostToConnection. Frames are buffered into
+    full SSE-style records (event: + data:) and delivered as JSON envelopes
+    so the mobile WS client can split events without re-parsing SSE."""
+
+    def __init__(self, callback_url: str, connection_id: str) -> None:
+        import boto3
+        self._client = boto3.client(
+            "apigatewaymanagementapi",
+            endpoint_url=callback_url,
+        )
+        self._connection_id = connection_id
+        self._closed = False
+
+    def write(self, payload: bytes) -> None:
+        if self._closed:
+            return
+        # Each call to write() corresponds to a full SSE frame as built by
+        # the existing sse() helper. Split on the blank-line delimiter so
+        # we send one event per WS message.
+        text = payload.decode("utf-8", "replace")
+        for chunk in text.split("\n\n"):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            event_type: str | None = None
+            data_parts: list[str] = []
+            for line in chunk.splitlines():
+                if line.startswith("event: "):
+                    event_type = line[len("event: "):]
+                elif line.startswith("data: "):
+                    data_parts.append(line[len("data: "):])
+                elif line.startswith("data:"):
+                    data_parts.append(line[len("data:"):])
+            data = "\n".join(data_parts)
+            self._post({"event": event_type or "message", "data": data})
+
+    def flush(self) -> None:
+        pass
+
+    def _post(self, body: dict) -> None:
+        try:
+            self._client.post_to_connection(
+                ConnectionId=self._connection_id,
+                Data=json.dumps(body).encode("utf-8"),
+            )
+        except Exception as exc:
+            log(f"post_to_connection failed: {exc}; closing sink")
+            self._closed = True
+
+
+def run_ws_mode() -> None:
+    log(f"WS mode: agent={AGENT_ID} repo={REPO}@{REPO_REF} connection={WS_CONNECTION_ID}")
+    if not WS_PROMPT:
+        log("WEND_PROMPT missing; nothing to run")
+        return
+    clone_repo()
+    sink = WSSink(WS_CALLBACK_URL, WS_CONNECTION_ID)
+    try:
+        stream_claude(WS_PROMPT, sink, WS_SESSION_ID or None)
+    finally:
+        sink._closed = True
+        log("WS dispatch complete; exiting")
+
+
 def main() -> None:
+    if MODE == "ws":
+        run_ws_mode()
+        return
     log(f"booting agentId={AGENT_ID} repo={REPO}@{REPO_REF} port={LISTEN_PORT}")
     clone_repo()
     start_cloudflared()
