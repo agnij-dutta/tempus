@@ -1,5 +1,15 @@
+output "api_function_url" {
+  description = "Public Lambda Function URL for the wend-cloud API"
+  value       = aws_lambda_function_url.wend_cloud_api.function_url
+}
+
+output "api_ecr_repository_url" {
+  description = "ECR repo for the wend-cloud-api Lambda container image"
+  value       = aws_ecr_repository.wend_cloud_api.repository_url
+}
+
 output "wend_agent_ecr_repository_url" {
-  description = "ECR repo URL to push the wend-agent image to"
+  description = "ECR repo for the wend-agent container image"
   value       = aws_ecr_repository.wend_agent.repository_url
 }
 
@@ -21,4 +31,9 @@ output "wend_agent_security_group_id" {
 output "wend_agent_log_group_name" {
   description = "CloudWatch log group for wend-agent container output"
   value       = aws_cloudwatch_log_group.wend_agent.name
+}
+
+output "subnet_ids" {
+  description = "Subnets the wend-agent tasks are launched into"
+  value       = local.effective_subnet_ids
 }

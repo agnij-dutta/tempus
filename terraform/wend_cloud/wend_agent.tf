@@ -156,12 +156,12 @@ resource "aws_iam_role_policy" "wend_agent_task" {
       {
         Effect = "Allow"
         Action = ["ssm:GetParameter", "ssm:GetParameters"]
-        Resource = "arn:aws:ssm:${var.region}:${var.aws_account_id}:parameter/wend/agents/*"
+        Resource = "arn:aws:ssm:${var.region}:${local.aws_account_id}:parameter/wend/agents/*"
       },
       {
         Effect = "Allow"
         Action = ["secretsmanager:GetSecretValue"]
-        Resource = "arn:aws:secretsmanager:${var.region}:${var.aws_account_id}:secret:/wend/github-app/*"
+        Resource = "arn:aws:secretsmanager:${var.region}:${local.aws_account_id}:secret:/wend/github-app/*"
       },
       {
         Effect = "Allow"
@@ -230,10 +230,3 @@ resource "aws_ecs_task_definition" "wend_agent" {
   }
 }
 
-locals {
-  effective_vpc_id = var.vpc_id != "" ? var.vpc_id : data.aws_vpc.default.id
-}
-
-data "aws_vpc" "default" {
-  default = true
-}

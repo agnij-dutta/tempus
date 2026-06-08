@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from .auth import ClerkUser, get_current_user
+from .clerk_client import get_user_metadata, require_anthropic_key, require_github_install
 from .concurrency import assert_within_cap
 from .config import WendAgentConfig
 from .provisioner import provision
@@ -38,8 +39,16 @@ async def cloud_dispatch(
     cfg: WendAgentConfig = Depends(_cfg),
 ):
     assert_within_cap(cfg, user.user_id)
+    meta = await get_user_metadata(cfg, user.user_id)
+    require_anthropic_key(meta)
+    require_github_install(meta)
     handle = await provision(
-        cfg, user_id=user.user_id, repo=body.repo, ref=body.ref, note_id=body.noteId,
+        cfg,
+        user_id=user.user_id,
+        user_meta=meta,
+        repo=body.repo,
+        ref=body.ref,
+        note_id=body.noteId,
     )
     forwarded = {"prompt": body.prompt, "sessionId": body.sessionId}
     return await proxy_dispatch(request, handle.tunnel_url, forwarded)

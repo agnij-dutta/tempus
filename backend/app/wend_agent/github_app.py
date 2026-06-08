@@ -36,7 +36,7 @@ def _app_jwt(cfg: WendAgentConfig) -> str:
     return jwt.encode(payload, _load_private_key(cfg), algorithm="RS256")
 
 
-async def _installation_id(cfg: WendAgentConfig, repo: str) -> int:
+async def _installation_id_for_repo(cfg: WendAgentConfig, repo: str) -> int:
     if repo in _installation_id_cache:
         return _installation_id_cache[repo]
     app_token = _app_jwt(cfg)
@@ -54,16 +54,34 @@ async def _installation_id(cfg: WendAgentConfig, repo: str) -> int:
     return install_id
 
 
+async def installation_id_for_user_login(cfg: WendAgentConfig, login: str) -> int | None:
+    """Return the Wend Cloud installation id for a GitHub user, or None if not installed."""
+    app_token = _app_jwt(cfg)
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(
+            f"https://api.github.com/users/{login}/installation",
+            headers={
+                "Authorization": f"Bearer {app_token}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return int(r.json()["id"])
+
+
 @dataclass(frozen=True)
 class InstallationToken:
     token: str
     expires_at: str
 
 
-async def mint_installation_token(cfg: WendAgentConfig, repo: str) -> InstallationToken:
+async def mint_installation_token_for_install(
+    cfg: WendAgentConfig, install_id: int, repo: str,
+) -> InstallationToken:
     """Mint a short-lived installation token scoped to a single repo, contents:read."""
     owner, name = repo.split("/", 1)
-    install_id = await _installation_id(cfg, repo)
     app_token = _app_jwt(cfg)
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.post(

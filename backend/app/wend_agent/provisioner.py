@@ -9,8 +9,9 @@ from dataclasses import dataclass
 
 import boto3
 
+from .clerk_client import UserMetadata
 from .config import WendAgentConfig
-from .github_app import mint_installation_token
+from .github_app import mint_installation_token_for_install
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ def _expires_at(idle_sec: int) -> int:
 async def provision(
     cfg: WendAgentConfig,
     user_id: str,
+    user_meta: UserMetadata,
     repo: str,
     ref: str,
     note_id: str | None,
@@ -56,13 +58,16 @@ async def provision(
         },
     )
 
-    install = await mint_installation_token(cfg, repo)
+    assert user_meta.github_installation_id is not None, "github install required pre-provision"
+    assert user_meta.anthropic_api_key, "anthropic api key required pre-provision"
+    install = await mint_installation_token_for_install(
+        cfg, user_meta.github_installation_id, repo,
+    )
     token_param = f"/wend/agents/{agent_id}/github_token"
     anth_param = f"/wend/agents/{agent_id}/anthropic_key"
 
-    anth = ssm.get_parameter(Name=cfg.anthropic_key_secret, WithDecryption=True)["Parameter"]["Value"]
     ssm.put_parameter(Name=token_param, Value=install.token, Type="SecureString", Overwrite=True)
-    ssm.put_parameter(Name=anth_param, Value=anth, Type="SecureString", Overwrite=True)
+    ssm.put_parameter(Name=anth_param, Value=user_meta.anthropic_api_key, Type="SecureString", Overwrite=True)
 
     overrides = {
         "containerOverrides": [{
