@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 
 from app.routes import preview
+from app.wend_agent import router as wend_agent_router
 
 # Configure logging
 logging.basicConfig(
@@ -127,6 +128,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(preview.router)
+app.include_router(wend_agent_router)
 
 
 @app.get("/health", tags=["default"], summary="Root Health Check")
