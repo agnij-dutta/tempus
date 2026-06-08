@@ -234,6 +234,8 @@ async def _handle_ws_dispatch(event: dict):
         ws_callback_url=_ws_callback_url(event),
         prompt=prompt,
         session_id=payload.get("sessionId") or payload.get("session_id"),
+        push_token=payload.get("pushToken") or payload.get("push_token"),
+        note_title=payload.get("noteTitle") or payload.get("note_title"),
     )
     _post_to_connection(cfg, event, connection_id, _ack_frame(handle.agent_id, repo))
     return {"statusCode": 200, "body": ""}

@@ -263,6 +263,37 @@ WS_CONNECTION_ID = ENV.get("WEND_WS_CONNECTION_ID", "")
 WS_CALLBACK_URL = ENV.get("WEND_WS_CALLBACK_URL", "")
 WS_PROMPT = ENV.get("WEND_PROMPT", "")
 WS_SESSION_ID = ENV.get("WEND_SESSION_ID", "")
+PUSH_TOKEN = ENV.get("WEND_PUSH_TOKEN", "")
+NOTE_TITLE = ENV.get("WEND_NOTE_TITLE", "")
+NOTE_ID = ENV.get("WEND_NOTE_ID", "")
+
+
+def fire_push(body: str, ok: bool) -> None:
+    """Fire an Expo push to the user's device. Best-effort; failures are
+    logged but don't impact the dispatch result. Short body — the
+    notification panel only shows ~2 lines."""
+    if not PUSH_TOKEN:
+        return
+    title = (NOTE_TITLE or REPO.split("/")[-1] or "Wend") if ok else "Wend run failed"
+    payload = {
+        "to": PUSH_TOKEN,
+        "title": title[:60],
+        "body": body[:120],
+        "sound": None,
+        "data": {"noteId": NOTE_ID or "", "ok": ok},
+    }
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "https://exp.host/--/api/v2/push/send",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            r.read()
+    except Exception as exc:
+        log(f"push fire failed: {exc}")
 
 
 class WSSink:
@@ -321,14 +352,53 @@ def run_ws_mode() -> None:
     log(f"WS mode: agent={AGENT_ID} repo={REPO}@{REPO_REF} connection={WS_CONNECTION_ID}")
     if not WS_PROMPT:
         log("WEND_PROMPT missing; nothing to run")
+        fire_push("Wend couldn't find a prompt to run", ok=False)
         return
     clone_repo()
     sink = WSSink(WS_CALLBACK_URL, WS_CONNECTION_ID)
+    ok = True
+    last_text = ""
     try:
+        # Patch the sink's write to also accumulate any assistant text so we
+        # have something useful to put in the push body.
+        original_write = sink.write
+        def capture_and_write(data: bytes) -> None:
+            nonlocal last_text
+            try:
+                text = data.decode("utf-8", "replace")
+                if '"type":"assistant"' in text:
+                    last_text = text
+            except Exception:
+                pass
+            original_write(data)
+        sink.write = capture_and_write  # type: ignore[assignment]
         stream_claude(WS_PROMPT, sink, WS_SESSION_ID or None)
+    except Exception as exc:
+        ok = False
+        log(f"WS dispatch raised: {exc}")
     finally:
         sink._closed = True
+        body = _excerpt(last_text) or ("Reply ready" if ok else "Run errored")
+        fire_push(body, ok=ok)
         log("WS dispatch complete; exiting")
+
+
+def _excerpt(stream_json_text: str) -> str:
+    """Pull a short snippet of assistant text out of the captured
+    stream-json frames for the push notification body."""
+    if not stream_json_text:
+        return ""
+    try:
+        frame = json.loads(stream_json_text)
+        content = (frame.get("message") or {}).get("content") or []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                t = (block.get("text") or "").strip()
+                if t:
+                    return t.split("\n")[0][:120]
+    except Exception:
+        pass
+    return ""
 
 
 def main() -> None:

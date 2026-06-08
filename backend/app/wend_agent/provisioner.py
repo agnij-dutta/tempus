@@ -44,6 +44,8 @@ async def provision(
     ws_callback_url: str | None = None,
     prompt: str | None = None,
     session_id: str | None = None,
+    push_token: str | None = None,
+    note_title: str | None = None,
 ) -> AgentHandle:
     agent_id = str(uuid.uuid4())
     ddb = boto3.client("dynamodb", region_name=cfg.aws_region)
@@ -79,6 +81,12 @@ async def provision(
     ]
     if session_id:
         env_overrides.append({"name": "WEND_SESSION_ID", "value": session_id})
+    if push_token:
+        env_overrides.append({"name": "WEND_PUSH_TOKEN", "value": push_token})
+    if note_title:
+        env_overrides.append({"name": "WEND_NOTE_TITLE", "value": note_title[:60]})
+    if note_id:
+        env_overrides.append({"name": "WEND_NOTE_ID", "value": note_id})
     if ws_connection_id and ws_callback_url and prompt:
         # WS mode: container runs the prompt immediately and pushes events
         # via ApiGatewayManagementApi.PostToConnection to this connection.
