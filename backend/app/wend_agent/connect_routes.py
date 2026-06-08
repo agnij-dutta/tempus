@@ -78,49 +78,6 @@ async def disconnect_anthropic(
     return {"ok": True}
 
 
-class ClaudeConnectRequest(BaseModel):
-    credentials_json: str = Field(..., min_length=20, max_length=8192)
-
-
-@router.post("/claude")
-async def connect_claude(
-    body: ClaudeConnectRequest,
-    user: ClerkUser = Depends(get_current_user),
-    cfg: WendAgentConfig = Depends(_cfg),
-):
-    """Accept the user's Claude Code OAuth credentials (JSON blob the
-    Mac daemon read from its Keychain) and stash in Clerk private_metadata.
-    Cloud dispatches will write these to ~/.claude/.credentials.json in
-    the container and bill against the user's Claude subscription."""
-    import json as _json
-    try:
-        parsed = _json.loads(body.credentials_json)
-        if not isinstance(parsed, dict):
-            raise ValueError("not an object")
-    except Exception:
-        raise HTTPException(400, "credentials_json must be a JSON object")
-    await patch_user_metadata(cfg, user.user_id, {
-        "claude_credentials_json": body.credentials_json,
-    })
-    return {"ok": True}
-
-
-@router.delete("/claude")
-async def disconnect_claude(
-    user: ClerkUser = Depends(get_current_user),
-    cfg: WendAgentConfig = Depends(_cfg),
-):
-    await patch_user_metadata(cfg, user.user_id, {"claude_credentials_json": None})
-    return {"ok": True}
-
-
-@router.get("/claude/status")
-async def claude_status(
-    user: ClerkUser = Depends(get_current_user),
-    cfg: WendAgentConfig = Depends(_cfg),
-):
-    meta = await get_user_metadata(cfg, user.user_id)
-    return {"connected": meta.claude_credentials_json is not None}
 
 
 @router.get("/github/status")

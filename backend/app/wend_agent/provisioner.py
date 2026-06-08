@@ -67,7 +67,7 @@ async def provision(
     )
 
     assert user_meta.github_installation_id is not None, "github install required pre-provision"
-    assert user_meta.anthropic_api_key or user_meta.claude_credentials_json, "billing source required pre-provision"
+    assert user_meta.anthropic_api_key, "anthropic api key required pre-provision"
     install = await mint_installation_token_for_install(
         cfg, user_meta.github_installation_id, repo,
     )
@@ -77,12 +77,8 @@ async def provision(
         {"name": "WEND_REPO", "value": repo},
         {"name": "WEND_REPO_REF", "value": ref},
         {"name": "WEND_GITHUB_INSTALL_TOKEN", "value": install.token},
+        {"name": "WEND_ANTHROPIC_API_KEY", "value": user_meta.anthropic_api_key},
     ]
-    # Prefer Claude OAuth (subscription) over API key (pay-per-token).
-    if user_meta.claude_credentials_json:
-        env_overrides.append({"name": "WEND_CLAUDE_CREDS_JSON", "value": user_meta.claude_credentials_json})
-    elif user_meta.anthropic_api_key:
-        env_overrides.append({"name": "WEND_ANTHROPIC_API_KEY", "value": user_meta.anthropic_api_key})
     if session_id:
         env_overrides.append({"name": "WEND_SESSION_ID", "value": session_id})
     if push_token:

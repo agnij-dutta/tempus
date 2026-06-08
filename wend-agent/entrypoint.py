@@ -158,23 +158,7 @@ def stream_claude(prompt: str, sink: IO[bytes], session_id: str | None) -> None:
     if session_id:
         cmd.extend(["--resume", session_id])
     env = os.environ.copy()
-    # Subscription-billed path: write Claude OAuth creds to the file
-    # Claude Code reads on boot. Drop any ANTHROPIC_API_KEY in env so
-    # Claude doesn't prefer the API-key path.
-    if CLAUDE_CREDS_JSON:
-        try:
-            home = os.path.expanduser("~")
-            claude_dir = os.path.join(home, ".claude")
-            os.makedirs(claude_dir, exist_ok=True)
-            creds_path = os.path.join(claude_dir, ".credentials.json")
-            with open(creds_path, "w", encoding="utf-8") as f:
-                f.write(CLAUDE_CREDS_JSON)
-            os.chmod(creds_path, 0o600)
-            log(f"wrote Claude OAuth creds to {creds_path}")
-            env.pop("ANTHROPIC_API_KEY", None)
-        except Exception as exc:
-            log(f"failed to write Claude creds: {exc}")
-    elif ANTHROPIC_API_KEY:
+    if ANTHROPIC_API_KEY:
         env["ANTHROPIC_API_KEY"] = ANTHROPIC_API_KEY
 
     proc = subprocess.Popen(
@@ -284,7 +268,6 @@ NOTE_TITLE = ENV.get("WEND_NOTE_TITLE", "")
 NOTE_ID = ENV.get("WEND_NOTE_ID", "")
 USER_ID = ENV.get("WEND_USER_ID", "")
 RUNS_TABLE = ENV.get("WEND_RUNS_TABLE", "")
-CLAUDE_CREDS_JSON = ENV.get("WEND_CLAUDE_CREDS_JSON", "")
 
 
 def fire_push(body: str, ok: bool) -> None:
