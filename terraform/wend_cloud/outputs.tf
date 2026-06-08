@@ -1,6 +1,11 @@
 output "api_function_url" {
-  description = "Public Lambda Function URL for the wend-cloud API"
+  description = "Lambda Function URL (kept as fallback; the canonical public ingress is api_url)"
   value       = aws_lambda_function_url.wend_cloud_api.function_url
+}
+
+output "api_url" {
+  description = "Public API Gateway HTTP API URL — the canonical ingress for the mobile app"
+  value       = aws_apigatewayv2_stage.default.invoke_url
 }
 
 output "api_ecr_repository_url" {

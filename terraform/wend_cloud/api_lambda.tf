@@ -148,7 +148,7 @@ resource "aws_lambda_function" "wend_cloud_api" {
 
   environment {
     variables = {
-      AWS_LWA_INVOKE_MODE           = "RESPONSE_STREAM"
+      AWS_LWA_INVOKE_MODE           = "BUFFERED"
       AWS_LWA_READINESS_CHECK_PATH  = "/health"
       AWS_LWA_PORT                  = "8000"
       ECS_CLUSTER_NAME              = "default"
