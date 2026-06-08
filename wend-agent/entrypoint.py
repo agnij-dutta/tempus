@@ -154,7 +154,7 @@ def stream_claude(prompt: str, sink: IO[bytes], session_id: str | None) -> None:
         "confidence": 1.0,
     }))
 
-    cmd = ["claude", "--output-format", "stream-json", "--print"]
+    cmd = ["claude", "--output-format", "stream-json", "--print", "--verbose"]
     if session_id:
         cmd.extend(["--resume", session_id])
     env = os.environ.copy()

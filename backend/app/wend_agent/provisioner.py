@@ -31,14 +31,6 @@ def _expires_at(idle_sec: int) -> int:
     return int(time.time()) + idle_sec
 
 
-def _make_secrets(token_param: str, anth_param: str, agent_id: str, ws_mode: bool) -> list[dict]:
-    secrets = [
-        {"name": "WEND_GITHUB_INSTALL_TOKEN", "valueFrom": token_param},
-        {"name": "WEND_ANTHROPIC_API_KEY", "valueFrom": anth_param},
-    ]
-    if ws_mode:
-        secrets.append({"name": "WEND_PROMPT", "valueFrom": f"/wend/agents/{agent_id}/prompt"})
-    return secrets
 
 
 async def provision(
@@ -77,29 +69,23 @@ async def provision(
     install = await mint_installation_token_for_install(
         cfg, user_meta.github_installation_id, repo,
     )
-    token_param = f"/wend/agents/{agent_id}/github_token"
-    anth_param = f"/wend/agents/{agent_id}/anthropic_key"
-
-    ssm.put_parameter(Name=token_param, Value=install.token, Type="SecureString", Overwrite=True)
-    ssm.put_parameter(Name=anth_param, Value=user_meta.anthropic_api_key, Type="SecureString", Overwrite=True)
 
     env_overrides = [
         {"name": "WEND_AGENT_ID", "value": agent_id},
         {"name": "WEND_REPO", "value": repo},
         {"name": "WEND_REPO_REF", "value": ref},
+        {"name": "WEND_GITHUB_INSTALL_TOKEN", "value": install.token},
+        {"name": "WEND_ANTHROPIC_API_KEY", "value": user_meta.anthropic_api_key},
     ]
     if session_id:
         env_overrides.append({"name": "WEND_SESSION_ID", "value": session_id})
     if ws_connection_id and ws_callback_url and prompt:
         # WS mode: container runs the prompt immediately and pushes events
         # via ApiGatewayManagementApi.PostToConnection to this connection.
-        # The prompt itself is stashed in SSM (env-var size limit is tight
-        # for longer prompts).
-        prompt_param = f"/wend/agents/{agent_id}/prompt"
-        ssm.put_parameter(Name=prompt_param, Value=prompt, Type="SecureString", Overwrite=True)
         env_overrides += [
             {"name": "WEND_WS_CONNECTION_ID", "value": ws_connection_id},
             {"name": "WEND_WS_CALLBACK_URL", "value": ws_callback_url},
+            {"name": "WEND_PROMPT", "value": prompt},
             {"name": "WEND_MODE", "value": "ws"},
         ]
 
@@ -107,7 +93,6 @@ async def provision(
         "containerOverrides": [{
             "name": "wend-agent",
             "environment": env_overrides,
-            "secrets": _make_secrets(token_param, anth_param, agent_id, ws_mode=bool(ws_connection_id and prompt)),
         }]
     }
 
