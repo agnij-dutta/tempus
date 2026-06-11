@@ -10,6 +10,7 @@ from .subscription import (
     PRO_CLOUD_QUOTA,
     PAYGO_OVERAGE_USD_PER_DISPATCH,
     get_subscription,
+    paywalls_disabled,
 )
 
 router = APIRouter(prefix="/v1/subscription", tags=["wend-subscription"])
@@ -34,4 +35,5 @@ async def status(
         "cloud_quota_remaining": sub.cloud_quota_remaining,
         "can_pair_mac": sub.can_pair_mac,
         "overage_usd_per_dispatch": PAYGO_OVERAGE_USD_PER_DISPATCH,
+        "paywalls_disabled": paywalls_disabled(),
     }

@@ -162,6 +162,7 @@ resource "aws_lambda_function" "wend_cloud_api" {
       WEND_WS_STAGE                 = aws_apigatewayv2_stage.wend_cloud_ws.name
       WEND_WS_CONNECTIONS_TABLE     = aws_dynamodb_table.wend_ws_connections.name
       WEND_RUNS_TABLE               = aws_dynamodb_table.wend_runs.name
+      WEND_PAYWALLS_DISABLED        = "1"
       AWS_LWA_READINESS_CHECK_PATH  = "/health"
       AWS_LWA_PORT                  = "8000"
       ECS_CLUSTER_NAME              = "default"

@@ -19,6 +19,7 @@ dispatch decision.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Literal
@@ -29,6 +30,13 @@ from fastapi import HTTPException
 from .config import WendAgentConfig
 from .clerk_client import _clerk_secret_key
 import httpx
+
+
+def paywalls_disabled() -> bool:
+    """When True, the server treats every authenticated user as Pro and
+    skips quota / gating checks. Used for the closed alpha while Stripe
+    is being wired and for any future "free week" promotions."""
+    return os.getenv("WEND_PAYWALLS_DISABLED", "").lower() in ("1", "true", "yes")
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +110,14 @@ def _count_cloud_runs_this_month(cfg: WendAgentConfig, user_id: str) -> int:
 
 
 async def get_subscription(cfg: WendAgentConfig, user_id: str) -> Subscription:
+    if paywalls_disabled():
+        used = _count_cloud_runs_this_month(cfg, user_id)
+        return Subscription(
+            tier="pro",
+            status="active",
+            current_period_end=None,
+            cloud_used_this_month=used,
+        )
     meta = await _read_clerk_subscription(cfg, user_id)
     tier: Tier = meta.get("subscription_tier") or "free"
     status = meta.get("subscription_status") or ("active" if tier == "free" else "none")
@@ -116,6 +132,8 @@ async def get_subscription(cfg: WendAgentConfig, user_id: str) -> Subscription:
 
 
 def require_mac_pair_allowed(sub: Subscription) -> None:
+    if paywalls_disabled():
+        return
     if not sub.can_pair_mac:
         raise HTTPException(
             status_code=402,
@@ -127,6 +145,8 @@ def require_mac_pair_allowed(sub: Subscription) -> None:
 
 
 def require_cloud_dispatch_allowed(sub: Subscription) -> None:
+    if paywalls_disabled():
+        return
     if sub.tier == "free":
         raise HTTPException(
             status_code=402,
