@@ -25,6 +25,7 @@ import boto3
 from fastapi import APIRouter, HTTPException, Request
 
 from .clerk_client import get_user_metadata, require_anthropic_key, require_github_install
+from .subscription import get_subscription, require_cloud_dispatch_allowed
 from .concurrency import assert_within_cap
 from .config import WendAgentConfig
 from .provisioner import provision
@@ -182,6 +183,8 @@ async def _handle_ws_dispatch(event: dict):
         return {"statusCode": 400, "body": "prompt required"}
 
     try:
+        sub = await get_subscription(cfg, user_id)
+        require_cloud_dispatch_allowed(sub)
         assert_within_cap(cfg, user_id)
         meta = await get_user_metadata(cfg, user_id)
         require_anthropic_key(meta)
