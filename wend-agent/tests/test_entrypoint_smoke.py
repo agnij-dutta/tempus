@@ -59,17 +59,21 @@ def test_dispatch_emits_sse_envelope(tmp_path):
         assert resp.status == 200
         assert resp.getheader("Content-Type", "").startswith("text/event-stream")
 
-        seen_route = seen_done = False
-        deadline = time.time() + 30
+        # Accumulate into a rolling buffer: SSE markers can straddle read
+        # boundaries. read1() returns whatever is available — read(1024)
+        # would block for a full 1024 bytes that never arrive at the tail
+        # of the stream (the server holds the connection open after done).
+        buf = ""
+        deadline = time.time() + 90
         while time.time() < deadline:
-            chunk = resp.read(1024).decode("utf-8", "replace")
-            if "event: route" in chunk:
-                seen_route = True
-            if "event: done" in chunk:
-                seen_done = True
+            chunk = resp.read1(1024).decode("utf-8", "replace")
+            if not chunk:
+                break  # stream closed
+            buf += chunk
+            if "event: done" in buf:
                 break
-        assert seen_route, "missing event: route"
-        assert seen_done, "missing event: done"
+        assert "event: route" in buf, "missing event: route"
+        assert "event: done" in buf, "missing event: done"
     finally:
         proc.terminate()
         try:

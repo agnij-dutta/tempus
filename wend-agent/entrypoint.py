@@ -146,7 +146,8 @@ def sse(stream: IO[bytes], event: str | None, data: str) -> None:
 
 def stream_claude(prompt: str, sink: IO[bytes], session_id: str | None) -> None:
     """Spawn claude --output-format=stream-json --print and pipe JSONL to SSE."""
-    cwd = WORKSPACE if os.listdir(WORKSPACE) else None
+    # /workspace only exists in the container; guard so local dev/tests work.
+    cwd = WORKSPACE if os.path.isdir(WORKSPACE) and os.listdir(WORKSPACE) else None
     sse(sink, "route", json.dumps({
         "name": REPO.split("/")[-1] if REPO else "cloud",
         "cwd": cwd or "/workspace",
@@ -358,7 +359,10 @@ def run_ws_mode() -> None:
         return
     clone_repo()
     sink = WSSink(WS_CALLBACK_URL, WS_CONNECTION_ID)
-    captured: dict = {"assistant": "", "tool_uses": [], "tool_calls": [], "result": None, "session_id": ""}
+    captured: dict = {
+        "assistant": "", "tool_uses": [], "tool_calls": [],
+        "tool_result_text": "", "result": None, "session_id": "",
+    }
     started_at = time.time()
     ok = True
     try:
@@ -383,6 +387,22 @@ def run_ws_mode() -> None:
                 else ("Reply ready" if ok else "Run errored"))
         fire_push(body, ok=ok)
         log("WS dispatch complete; exiting")
+
+
+# Bound on accumulated tool-result text. Used ONLY for link extraction;
+# never persisted wholesale.
+_RESULT_TEXT_CAP = 256 * 1024
+
+
+def _append_result_text(captured: dict, text: str) -> None:
+    """Accumulate tool-result text into a bounded buffer (drop beyond cap)."""
+    if not text:
+        return
+    buf = captured.setdefault("tool_result_text", "")
+    remaining = _RESULT_TEXT_CAP - len(buf)
+    if remaining <= 0:
+        return
+    captured["tool_result_text"] = buf + text[:remaining]
 
 
 def _capture_frame(text: str, captured: dict) -> None:
@@ -417,11 +437,181 @@ def _capture_frame(text: str, captured: dict) -> None:
                             "name": block["name"],
                             "input": block.get("input"),
                         })
+        elif ftype == "user" and isinstance(frame.get("message"), dict):
+            # stream-json surfaces tool results as user frames whose content
+            # blocks are {"type": "tool_result", "content": str | [{type, text}]}.
+            for block in frame["message"].get("content", []) or []:
+                if not (isinstance(block, dict) and block.get("type") == "tool_result"):
+                    continue
+                content = block.get("content")
+                if isinstance(content, str):
+                    _append_result_text(captured, content)
+                elif isinstance(content, list):
+                    for part in content:
+                        if (isinstance(part, dict) and part.get("type") == "text"
+                                and isinstance(part.get("text"), str)):
+                            _append_result_text(captured, part["text"])
         elif ftype == "result":
             captured["result"] = frame
             sid = frame.get("session_id")
             if isinstance(sid, str):
                 captured["session_id"] = sid
+
+
+# --- run-record derivation -------------------------------------------------
+
+_URL_RE = re.compile(r"https://[^\s<>\"'`]+")
+_GITHUB_PR_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/pull/\d+")
+_LINK_TRAILING_PUNCT = ")>.,;'\""
+_MAX_LINKS = 50
+
+_FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit", "Create"}
+_PATH_KEYS = ("file_path", "path", "notebook_path")
+_MAX_FILES_CHANGED = 200
+
+_SINGLE_INPUT_CAP = 16 * 1024       # per-tool-call serialized input cap
+_TOOL_CALLS_JSON_CAP = 250 * 1024   # whole toolCalls array cap
+_COMBINED_CAP = 380 * 1024          # response + toolCalls budget (400 KB item limit)
+
+
+def _link_excluded(url: str) -> bool:
+    """Drop localhost/loopback and AWS infra URLs."""
+    try:
+        host = url.split("//", 1)[1].split("/", 1)[0].split("@")[-1]
+        host = host.split(":", 1)[0].lower()
+    except Exception:
+        return True
+    if host in ("localhost", "127.0.0.1", "0.0.0.0"):
+        return True
+    if host == "amazonaws.com" or host.endswith(".amazonaws.com"):
+        return True
+    return False
+
+
+def extract_links(assistant_text: str, tool_calls: list, result_text: str) -> list[str]:
+    """All https URLs from assistant text, tool-call command/url inputs, and
+    the bounded tool-result buffer. Deduped in first-seen order, infra URLs
+    excluded, GitHub PR URLs first, capped at _MAX_LINKS."""
+    parts = [assistant_text or ""]
+    for call in tool_calls or []:
+        inp = call.get("input") if isinstance(call, dict) else None
+        if isinstance(inp, dict):
+            for key in ("command", "url"):
+                if key in inp:
+                    val = inp[key]
+                    if isinstance(val, str):
+                        parts.append(val)
+                    else:
+                        try:
+                            parts.append(json.dumps(val, default=str))
+                        except Exception:
+                            pass
+    parts.append(result_text or "")
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for m in _URL_RE.finditer("\n".join(parts)):
+        url = m.group(0).rstrip(_LINK_TRAILING_PUNCT)
+        if not url or url in seen:
+            continue
+        if _link_excluded(url):
+            continue
+        seen.add(url)
+        ordered.append(url)
+
+    prs = [u for u in ordered if _GITHUB_PR_RE.match(u)]
+    rest = [u for u in ordered if not _GITHUB_PR_RE.match(u)]
+    return (prs + rest)[:_MAX_LINKS]
+
+
+def extract_files_changed(tool_calls: list) -> list[str]:
+    """file_path/path/notebook_path of write-shaped tool calls, deduped in
+    order, capped at _MAX_FILES_CHANGED."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for call in tool_calls or []:
+        if not isinstance(call, dict) or call.get("name") not in _FILE_TOOLS:
+            continue
+        inp = call.get("input")
+        if not isinstance(inp, dict):
+            continue
+        path = next(
+            (inp[k] for k in _PATH_KEYS if isinstance(inp.get(k), str) and inp[k]),
+            None,
+        )
+        if path and path not in seen:
+            seen.add(path)
+            out.append(path)
+            if len(out) >= _MAX_FILES_CHANGED:
+                break
+    return out
+
+
+def _truncate_strings(value, limit: int):
+    """Recursively truncate string values, keeping path-identifying keys
+    intact, marking truncations with a suffix."""
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if k in _PATH_KEYS and isinstance(v, str):
+                out[k] = v
+            else:
+                out[k] = _truncate_strings(v, limit)
+        return out
+    if isinstance(value, list):
+        return [_truncate_strings(v, limit) for v in value]
+    if isinstance(value, str) and len(value) > limit:
+        return value[:limit] + "…[truncated]"
+    return value
+
+
+def _json_size(obj) -> int:
+    return len(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+
+
+def serialize_tool_calls(tool_calls: list, response_text: str) -> list[dict]:
+    """Make captured tool calls persistable as {name, input?} entries.
+
+    Per call: JSON-round-trip the input; if a single serialized input exceeds
+    _SINGLE_INPUT_CAP, truncate its string fields (paths kept intact). The
+    whole array must fit _TOOL_CALLS_JSON_CAP, and response + array must fit
+    _COMBINED_CAP — inputs are dropped from the largest entries (names kept)
+    until it fits; entries are dropped from the end as a last resort."""
+    entries: list[dict] = []
+    for call in tool_calls or []:
+        if not isinstance(call, dict):
+            continue
+        name = call.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        inp = call.get("input")
+        try:
+            inp = json.loads(json.dumps(inp, ensure_ascii=False, default=str))
+        except Exception:
+            inp = None
+        if inp is not None and _json_size(inp) > _SINGLE_INPUT_CAP:
+            for limit in (1024, 128):
+                inp = _truncate_strings(inp, limit)
+                if _json_size(inp) <= _SINGLE_INPUT_CAP:
+                    break
+            else:
+                inp = None  # pathological (huge paths/many fields): keep name only
+        entry: dict = {"name": name}
+        if inp is not None:
+            entry["input"] = inp
+        entries.append(entry)
+
+    response_bytes = len((response_text or "").encode("utf-8"))
+    budget = min(_TOOL_CALLS_JSON_CAP, max(_COMBINED_CAP - response_bytes, 2))
+
+    while entries and _json_size(entries) > budget:
+        with_input = [e for e in entries if "input" in e]
+        if not with_input:
+            entries.pop()  # all inputs already dropped; shed entries from the end
+            continue
+        largest = max(with_input, key=lambda e: _json_size(e["input"]))
+        del largest["input"]
+    return entries
 
 
 def persist_run(captured: dict, started_at: float, ended_at: float, ok: bool) -> None:
@@ -433,6 +623,12 @@ def persist_run(captured: dict, started_at: float, ended_at: float, ok: bool) ->
         import boto3, uuid
         ddb = boto3.client("dynamodb")
         result = captured.get("result") or {}
+        assistant_text = captured.get("assistant") or ""
+        raw_tool_calls = captured.get("tool_calls") or []
+        links = extract_links(
+            assistant_text, raw_tool_calls, captured.get("tool_result_text") or "")
+        files_changed = extract_files_changed(raw_tool_calls)
+        tool_calls = serialize_tool_calls(raw_tool_calls, assistant_text)
         item = {
             "noteId": {"S": NOTE_ID},
             "createdAt": {"N": str(int(started_at * 1000))},
@@ -446,8 +642,14 @@ def persist_run(captured: dict, started_at: float, ended_at: float, ok: bool) ->
             "durationMs": {"N": str(int((ended_at - started_at) * 1000))},
             "costUsd": {"N": str(float(result.get("total_cost_usd") or 0.0))},
             "toolUses": {"SS": list(set(captured["tool_uses"])) if captured["tool_uses"] else ["__none__"]},
+            "toolCallsJson": {"S": json.dumps(tool_calls, ensure_ascii=False)},
             "expiresAt": {"N": str(int(ended_at) + 86400 * 30)},  # 30-day retention
         }
+        # DynamoDB string sets can't be empty — omit the attribute entirely.
+        if links:
+            item["links"] = {"SS": links}
+        if files_changed:
+            item["filesChanged"] = {"SS": files_changed}
         ddb.put_item(TableName=RUNS_TABLE, Item=item)
         log(f"wend-runs persisted noteId={NOTE_ID}")
     except Exception as exc:

@@ -6,6 +6,7 @@ newest first. Auth: Clerk JWT; result filtered to the requesting user.
 """
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -33,8 +34,22 @@ def _decode_item(item: dict[str, Any]) -> dict[str, Any]:
     def get_n(k: str, default: float = 0) -> float:
         try: return float(item.get(k, {}).get("N", str(default)))
         except Exception: return default
-    tool_uses_raw = item.get("toolUses", {}).get("SS", []) or []
-    tool_uses = [t for t in tool_uses_raw if t != "__none__"]
+    def get_ss(k: str) -> list[str]:
+        raw = item.get(k, {}).get("SS", []) or []
+        return [v for v in raw if v != "__none__"]
+
+    tool_uses = get_ss("toolUses")
+
+    tool_calls: list[Any] = []
+    tool_calls_json = item.get("toolCallsJson", {}).get("S", "")
+    if tool_calls_json:
+        try:
+            parsed = json.loads(tool_calls_json)
+            if isinstance(parsed, list):
+                tool_calls = parsed
+        except Exception:
+            tool_calls = []
+
     return {
         "runId": get_s("runId"),
         "noteId": get_s("noteId"),
@@ -45,6 +60,9 @@ def _decode_item(item: dict[str, Any]) -> dict[str, Any]:
         "durationMs": int(get_n("durationMs")),
         "costUsd": get_n("costUsd"),
         "toolUses": tool_uses,
+        "toolCalls": tool_calls,
+        "links": get_ss("links"),
+        "filesChanged": get_ss("filesChanged"),
         "repo": get_s("repo"),
         "agentId": get_s("agentId"),
     }
